@@ -1,5 +1,6 @@
-FROM python:3.14-slim
+FROM python:3.14.3-slim
 
+# Install Chromium for headless browsing
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
@@ -12,9 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Create persistent data directory
-RUN mkdir -p /app/data
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+ENV PYTHONUNBUFFERED=1
 
-EXPOSE 8501
+EXPOSE 5000
 
-CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false"]
+CMD ["python", "app.py"]
