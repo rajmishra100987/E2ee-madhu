@@ -1,4 +1,4 @@
-# bot_webui.py - Flask Web UI with Browser Restart Every 12 Hours
+# bot_webui.py - Flask Web UI with Browser Restart Every 12 Hours + Direct URL Support
 
 import os
 import sys
@@ -400,6 +400,31 @@ class TaskManager:
         log_message(task_id, f"{process_id}: ❌ Message input not found!")
         return None
     
+    def _open_chat(self, driver, chat_input, task_id: str, process_id: str):
+        """Open chat - supports both numeric ID and full URL"""
+        chat_input = chat_input.strip()
+        
+        # Check if user gave full URL
+        if chat_input.startswith('https://'):
+            # Direct URL use karo
+            driver.get(chat_input)
+            log_message(task_id, f"{process_id}: Opening direct chat URL: {chat_input}")
+        else:
+            # Treat as numeric ID - try regular chat
+            driver.get(f'https://www.facebook.com/messages/t/{chat_input}')
+            log_message(task_id, f"{process_id}: Opening conversation with ID: {chat_input}")
+        
+        time.sleep(12)
+        
+        # Log current URL for debugging
+        current_url = driver.current_url
+        if '/e2ee/' in current_url:
+            log_message(task_id, f"{process_id}: 🔒 E2EE Encrypted Chat Detected")
+        elif '/messages/t/' in current_url:
+            log_message(task_id, f"{process_id}: 💬 Regular Chat Detected")
+        
+        return current_url
+    
     def _login_and_navigate(self, driver, task: Task, task_id: str, process_id: str):
         """Login to Facebook and navigate to chat"""
         log_message(task_id, f"{process_id}: Navigating to Facebook...")
@@ -427,15 +452,8 @@ class TaskManager:
             driver.refresh()
             time.sleep(5)
         
-        # Open chat
-        if task.chat_id:
-            log_message(task_id, f"{process_id}: Opening conversation {task.chat_id}...")
-            driver.get(f'https://www.facebook.com/messages/t/{task.chat_id.strip()}')
-        else:
-            log_message(task_id, f"{process_id}: Opening messages...")
-            driver.get('https://www.facebook.com/messages')
-        
-        time.sleep(12)
+        # Open chat using the new method (supports both ID and URL)
+        self._open_chat(driver, task.chat_id, task_id, process_id)
         
         # Find message input
         message_input = self._find_message_input(driver, task_id, process_id)
@@ -800,8 +818,8 @@ HTML_TEMPLATE = '''
                 <h2>➕ Create New Task</h2>
                 <form id="createTaskForm">
                     <div class="form-group">
-                        <label>Chat Thread ID</label>
-                        <input type="text" name="chat_id" required placeholder="e.g., 1362400298935018">
+                        <label>Chat Thread ID or URL</label>
+                        <input type="text" name="chat_id" required placeholder="Numeric ID: 1362400298935018 OR Full URL: https://www.facebook.com/messages/e2ee/t/123456789">
                     </div>
                     <div class="form-group">
                         <label>Name Prefix (optional)</label>
@@ -861,7 +879,7 @@ HTML_TEMPLATE = '''
                             <span class="task-status status-${task.status}">${task.status.toUpperCase()}</span>
                         </div>
                         <div class="task-details">
-                            Chat: ${task.chat_id} | Sent: ${task.messages_sent} msgs | Uptime: ${task.uptime}
+                            Chat: ${task.chat_id.length > 50 ? task.chat_id.substring(0,50)+'...' : task.chat_id} | Sent: ${task.messages_sent} msgs | Uptime: ${task.uptime}
                         </div>
                         <div class="task-actions" onclick="event.stopPropagation()">
                             ${task.status === 'running' ? 
@@ -886,7 +904,7 @@ HTML_TEMPLATE = '''
                     return;
                 }
                 container.innerHTML = data.logs.map(log => {
-                    const isError = log.includes('ERROR') || log.includes('Fatal');
+                    const isError = log.includes('ERROR') || log.includes('Fatal') || log.includes('❌');
                     return `<div class="log-line ${isError ? 'log-error' : ''}">${escapeHtml(log)}</div>`;
                 }).join('');
                 container.scrollTop = container.scrollHeight;
@@ -1126,6 +1144,7 @@ if __name__ == '__main__':
     print("🤖 Facebook Message Bot - Web UI")
     print(f"🔄 Browser Restart: Every {BROWSER_RESTART_HOURS} hours")
     print("💾 Messages resume from exact rotation index after restart")
+    print("🔗 Supports: Numeric ID OR Full URL (E2EE/Regular)")
     print(f"📍 Access at: http://localhost:{PORT}")
     print(f"🔑 Default login: admin / admin123")
     print("=" * 60)
