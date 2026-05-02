@@ -1,6 +1,5 @@
 FROM python:3.12-slim
 
-# Install Chromium for headless browsing
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
@@ -17,6 +16,6 @@ ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 8080
+EXPOSE 5000
 
-CMD ["python", "app.py"]
+CMD ["python", "bot_webui.py"]
