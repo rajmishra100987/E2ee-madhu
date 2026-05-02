@@ -1,4 +1,5 @@
-# bot_webui.py - Flask Web UI with Browser Restart Every 12 Hours + Direct URL Support
+# bot_webui.py - Flask Web UI with Hard Kill + Auto Restart + Direct URL Support
+# Kabhi restart fail nahi hoga!
 
 import os
 import sys
@@ -8,8 +9,9 @@ import random
 import sqlite3
 import threading
 import gc
+import subprocess
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from collections import deque
@@ -20,18 +22,19 @@ from cryptography.fernet import Fernet
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 # ==================== CONFIGURATION ====================
 SECRET_KEY = "TERI MA KI CHUT MDC"
 CODE = "03102003"
 MAX_TASKS = 50
 PORT = int(os.environ.get("PORT", 5000))
-BROWSER_RESTART_HOURS = 12  # Browser restart every 12 hours
+BROWSER_RESTART_HOURS = 12  # Har 12 hours restart
 
 DB_PATH = Path(__file__).parent / 'bot_data.db'
 ENCRYPTION_KEY_FILE = Path(__file__).parent / '.encryption_key'
 
-# Logs storage - limited to save memory
+# Logs storage
 task_logs = {}
 
 def log_message(task_id: str, msg: str):
@@ -43,6 +46,20 @@ def log_message(task_id: str, msg: str):
     
     task_logs[task_id].append(formatted_msg)
     print(formatted_msg)
+
+# ==================== HARD KILL FUNCTION ====================
+def hard_kill_all_chromium(task_id: str = ""):
+    """Force kill ALL chromium processes - ports free ho jayenge"""
+    try:
+        subprocess.run(['pkill', '-9', '-f', 'chromium'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        subprocess.run(['pkill', '-9', '-f', 'chromedriver'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        subprocess.run(['pkill', '-9', '-f', 'chrome'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        subprocess.run(['rm', '-rf', '/dev/shm/.org.chromium*'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        time.sleep(2)
+        if task_id:
+            log_message(task_id, "🔪 Hard kill completed - ports freed")
+    except:
+        pass
 
 # ==================== ENCRYPTION ====================
 def get_encryption_key():
@@ -217,6 +234,7 @@ class TaskManager:
             del self.tasks[task_id]
             if task_id in task_logs:
                 del task_logs[task_id]
+            hard_kill_all_chromium(task_id)
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM tasks WHERE task_id = ?', (task_id,))
@@ -258,7 +276,9 @@ class TaskManager:
         return True
     
     def _setup_browser(self, task_id: str):
-        """Setup Chrome browser with minimal memory usage"""
+        """Setup Chrome browser with hard kill before start"""
+        hard_kill_all_chromium(task_id)
+        
         chrome_options = Options()
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
@@ -272,14 +292,18 @@ class TaskManager:
         
         # Memory optimization
         chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--max_old_space_size=128')
-        chrome_options.add_argument('--js-flags="--max-old-space-size=128"')
+        chrome_options.add_argument('--max_old_space_size=256')
+        chrome_options.add_argument('--js-flags="--max-old-space-size=256"')
         
-        # Ghost mode
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        # Anti-detection
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         
-        # Try to find Chromium binary
+        # Crash prevention
+        chrome_options.add_argument('--disable-crash-reporter')
+        chrome_options.add_argument('--disable-breakpad')
+        
+        # Find Chromium
         chromium_paths = [
             '/usr/bin/chromium',
             '/usr/bin/chromium-browser',
@@ -293,50 +317,46 @@ class TaskManager:
                 log_message(task_id, f'Found Chromium at: {chromium_path}')
                 break
         
-        # Try to find ChromeDriver
-        chromedriver_paths = [
-            '/usr/bin/chromedriver',
-            '/usr/local/bin/chromedriver'
-        ]
-        
-        driver_path = None
-        for driver_candidate in chromedriver_paths:
-            if Path(driver_candidate).exists():
-                driver_path = driver_candidate
-                log_message(task_id, f'Found ChromeDriver at: {driver_path}')
-                break
-        
         try:
-            from selenium.webdriver.chrome.service import Service
+            # Try system chromedriver
+            chromedriver_paths = [
+                '/usr/bin/chromedriver',
+                '/usr/local/bin/chromedriver'
+            ]
             
-            if driver_path:
-                service = Service(executable_path=driver_path)
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                log_message(task_id, 'Chrome started with detected ChromeDriver!')
-            else:
-                driver = webdriver.Chrome(options=chrome_options)
-                log_message(task_id, 'Chrome started with default driver!')
+            for driver_path in chromedriver_paths:
+                if Path(driver_path).exists():
+                    log_message(task_id, f'Found ChromeDriver at: {driver_path}')
+                    service = Service(executable_path=driver_path, service_log_path='/dev/null')
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                    driver.set_window_size(1280, 720)
+                    driver.set_page_load_timeout(30)
+                    driver.set_script_timeout(30)
+                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    log_message(task_id, '✅ Chrome browser setup completed!')
+                    return driver
             
+            # Fallback to webdriver-manager
+            from webdriver_manager.chrome import ChromeDriverManager
+            from webdriver_manager.core.utils import ChromeType
+            log_message(task_id, 'Trying webdriver-manager...')
+            driver_path = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
+            service = Service(executable_path=driver_path, service_log_path='/dev/null')
+            driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.set_window_size(1280, 720)
-            log_message(task_id, 'Chrome browser setup completed successfully!')
+            driver.set_page_load_timeout(30)
+            driver.set_script_timeout(30)
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            log_message(task_id, '✅ Chrome started with webdriver-manager!')
             return driver
             
         except Exception as error:
             log_message(task_id, f'Browser setup failed: {error}')
-            try:
-                from webdriver_manager.chrome import ChromeDriverManager
-                from selenium.webdriver.chrome.service import Service
-                log_message(task_id, 'Trying webdriver-manager...')
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                log_message(task_id, 'Chrome started with webdriver-manager!')
-                return driver
-            except Exception as e:
-                log_message(task_id, f'All browser setups failed: {e}')
-                raise error
+            hard_kill_all_chromium(task_id)
+            raise error
     
     def _find_message_input(self, driver, task_id: str, process_id: str):
-        """Find message input box in Facebook"""
+        """Find message input box in Facebook - 12 selectors"""
         log_message(task_id, f"{process_id}: Finding message input...")
         
         try:
@@ -404,19 +424,15 @@ class TaskManager:
         """Open chat - supports both numeric ID and full URL"""
         chat_input = chat_input.strip()
         
-        # Check if user gave full URL
         if chat_input.startswith('https://'):
-            # Direct URL use karo
             driver.get(chat_input)
             log_message(task_id, f"{process_id}: Opening direct chat URL: {chat_input}")
         else:
-            # Treat as numeric ID - try regular chat
             driver.get(f'https://www.facebook.com/messages/t/{chat_input}')
             log_message(task_id, f"{process_id}: Opening conversation with ID: {chat_input}")
         
         time.sleep(12)
         
-        # Log current URL for debugging
         current_url = driver.current_url
         if '/e2ee/' in current_url:
             log_message(task_id, f"{process_id}: 🔒 E2EE Encrypted Chat Detected")
@@ -452,7 +468,7 @@ class TaskManager:
             driver.refresh()
             time.sleep(5)
         
-        # Open chat using the new method (supports both ID and URL)
+        # Open chat
         self._open_chat(driver, task.chat_id, task_id, process_id)
         
         # Find message input
@@ -467,7 +483,6 @@ class TaskManager:
         
         msg_idx = task.rotation_index % len(messages_list)
         base_message = messages_list[msg_idx]
-        
         message_to_send = f"{task.name_prefix} {base_message}" if task.name_prefix else base_message
         
         try:
@@ -493,7 +508,7 @@ class TaskManager:
             
             time.sleep(1)
             
-            # Try to find and click send button
+            # Try to send
             sent = driver.execute_script("""
                 const sendButtons = document.querySelectorAll('[aria-label*="Send" i]:not([aria-label*="like" i]), [data-testid="send-button"]');
                 
@@ -529,7 +544,7 @@ class TaskManager:
             task.last_active = datetime.now()
             self.save_task(task)
             
-            log_message(task_id, f"{process_id}: Message #{task.messages_sent} sent. Rotation index: {task.rotation_index}")
+            log_message(task_id, f"{process_id}: 📨 Message #{task.messages_sent} sent. Rotation: {task.rotation_index}")
             return True
             
         except Exception as send_error:
@@ -537,7 +552,7 @@ class TaskManager:
             return False
     
     def _run_task(self, task_id: str):
-        """Main task runner with browser restart every 12 hours"""
+        """Main task runner with hard kill restart"""
         task = self.tasks[task_id]
         task.running = True
         process_id = f"TASK-{task_id[-6:]}"
@@ -548,7 +563,6 @@ class TaskManager:
         
         while task.status == "running" and not task.stop_flag:
             try:
-                # Check if browser restart needed (every 12 hours)
                 current_time = datetime.now()
                 last_restart = task.last_browser_restart
                 
@@ -558,8 +572,7 @@ class TaskManager:
                     hours_since_restart = BROWSER_RESTART_HOURS + 1
                 
                 if hours_since_restart >= BROWSER_RESTART_HOURS or driver is None:
-                    log_message(task_id, f"{process_id}: 🔄 Browser restart - running for {hours_since_restart:.1f} hours...")
-                    log_message(task_id, f"{process_id}: 📍 Resuming from message #{task.messages_sent + 1} (rotation index: {task.rotation_index})")
+                    log_message(task_id, f"{process_id}: 🔄 Browser restart after {hours_since_restart:.1f} hours...")
                     
                     # Close old browser
                     if driver:
@@ -567,26 +580,51 @@ class TaskManager:
                             driver.quit()
                         except:
                             pass
+                    
+                    # HARD KILL - ye restart ko successful banayega
+                    hard_kill_all_chromium(task_id)
+                    
+                    # Create new browser with retry
+                    log_message(task_id, f"{process_id}: Creating fresh browser session...")
+                    
+                    new_driver = None
+                    for retry in range(3):
+                        try:
+                            new_driver = self._setup_browser(task_id)
+                            if new_driver:
+                                break
+                        except Exception as e:
+                            log_message(task_id, f"{process_id}: Setup retry {retry+1}/3 failed: {str(e)[:50]}")
+                            hard_kill_all_chromium(task_id)
+                            time.sleep(5)
+                    
+                    if not new_driver:
+                        log_message(task_id, f"{process_id}: ❌ Failed to setup browser!")
+                        time.sleep(30)
+                        continue
+                    
+                    driver = new_driver
+                    
+                    # Login and navigate with retry
+                    for retry in range(3):
+                        message_input = self._login_and_navigate(driver, task, task_id, process_id)
+                        if message_input:
+                            break
+                        log_message(task_id, f"{process_id}: Navigate retry {retry+1}/3...")
                         time.sleep(5)
                     
-                    # Create new browser
-                    log_message(task_id, f"{process_id}: Creating fresh browser session...")
-                    driver = self._setup_browser(task_id)
-                    
-                    # Login and navigate
-                    message_input = self._login_and_navigate(driver, task, task_id, process_id)
-                    
                     if not message_input:
-                        log_message(task_id, f"{process_id}: ❌ Failed to find message input! Retrying in 10 seconds...")
+                        log_message(task_id, f"{process_id}: ❌ Failed to find message input!")
                         driver = None
-                        time.sleep(10)
+                        hard_kill_all_chromium(task_id)
+                        time.sleep(15)
                         continue
                     
                     # Update last restart time
                     task.last_browser_restart = datetime.now()
                     self.save_task(task)
                     
-                    log_message(task_id, f"{process_id}: ✅ Browser ready! Continuing from message #{task.messages_sent + 1} (rotation index: {task.rotation_index})")
+                    log_message(task_id, f"{process_id}: ✅ Browser ready! Resuming from message #{task.messages_sent + 1} (rotation: {task.rotation_index})")
                     consecutive_failures = 0
                     time.sleep(3)
                 
@@ -621,27 +659,28 @@ class TaskManager:
                         consecutive_failures = 0
                     time.sleep(10)
                 
-                # Light memory cleanup (optional, doesn't affect)
+                # Memory cleanup every 50 messages
                 if task.messages_sent % 50 == 0 and task.messages_sent > 0:
                     try:
                         driver.execute_script("localStorage.clear(); sessionStorage.clear();")
                         gc.collect()
+                        log_message(task_id, f"{process_id}: 🧹 Memory cleaned")
                     except:
                         pass
                 
             except Exception as e:
                 log_message(task_id, f"{process_id}: Error: {str(e)[:100]}")
                 driver = None
+                hard_kill_all_chromium(task_id)
                 time.sleep(10)
         
         # Cleanup on exit
         if driver:
             try:
                 driver.quit()
-                log_message(task_id, f"{process_id}: Browser closed")
             except:
                 pass
-        
+        hard_kill_all_chromium(task_id)
         task.running = False
         if task_id in self.task_threads:
             del self.task_threads[task_id]
@@ -1141,8 +1180,9 @@ def health():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🤖 Facebook Message Bot - Web UI")
+    print("🤖 Facebook Message Bot - Web UI (with Hard Kill)")
     print(f"🔄 Browser Restart: Every {BROWSER_RESTART_HOURS} hours")
+    print("🔪 Hard kill enabled - restart kabhi fail nahi hoga")
     print("💾 Messages resume from exact rotation index after restart")
     print("🔗 Supports: Numeric ID OR Full URL (E2EE/Regular)")
     print(f"📍 Access at: http://localhost:{PORT}")
