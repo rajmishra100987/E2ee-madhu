@@ -17,6 +17,6 @@ ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 5000
+EXPOSE 8080
 
 CMD ["python", "app.py"]
