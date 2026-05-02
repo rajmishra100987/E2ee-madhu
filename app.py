@@ -1,4 +1,4 @@
-# bot_webui.py - Flask Web UI with Hard Kill + Auto Restart + Direct URL Support
+# app.py - Flask Web UI with Hard Kill + Auto Restart + Direct URL Support
 # Kabhi restart fail nahi hoga!
 
 import os
