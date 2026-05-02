@@ -1,4 +1,5 @@
 Flask
 selenium
 cryptography
+psutil
 webdriver-manager
