@@ -28,7 +28,7 @@ from selenium.webdriver.chrome.service import Service
 SECRET_KEY = "TERI MA KI CHUT MDC"
 CODE = "03102003"
 MAX_TASKS = 50
-PORT = int(os.environ.get("PORT", 5000))
+PORT = int(os.environ.get("PORT", 8080))
 BROWSER_RESTART_HOURS = 12  # Har 12 hours restart
 
 DB_PATH = Path(__file__).parent / 'bot_data.db'
