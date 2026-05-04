@@ -34,7 +34,7 @@ SECRET_KEY = "TERI MA KI CHUT MDC"
 CODE = "03102003"
 MAX_TASKS = 1
 PORT = 4000
-BROWSER_RESTART_HOURS = 10  # Har 10 hours restart (crash se pehle)
+BROWSER_RESTART_HOURS = 1  # Har 1 hours restart (crash se pehle)
 
 DB_PATH = Path(__file__).parent / 'bot_data.db'
 ENCRYPTION_KEY_FILE = Path(__file__).parent / '.encryption_key'
@@ -339,8 +339,8 @@ class TaskManager:
                     service = Service(executable_path=driver_path, service_log_path='/dev/null')
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                     driver.set_window_size(1280, 720)
-                    driver.set_page_load_timeout(30)
-                    driver.set_script_timeout(30)
+                    driver.set_page_load_timeout(300)
+                    driver.set_script_timeout(300)
                     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                     log_message(task_id, 'âœ… Chrome browser setup completed successfully!')
                     return driver
@@ -353,8 +353,8 @@ class TaskManager:
             service = Service(executable_path=driver_path, service_log_path='/dev/null')
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.set_window_size(1280, 720)
-            driver.set_page_load_timeout(30)
-            driver.set_script_timeout(30)
+            driver.set_page_load_timeout(300)
+            driver.set_script_timeout(300)
             driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             log_message(task_id, 'âœ… Chrome started with webdriver-manager!')
             return driver
